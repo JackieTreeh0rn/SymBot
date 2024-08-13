@@ -500,6 +500,17 @@ POST /api/deals/{dealId}/update_deal
 POST /api/deals/{dealId}/add_funds
 ```
 
+### Pause deal
+
+| **Name** | **Type** | **Mandatory** | **Values (default)** | **Description** |
+|----------|----------|---------------|----------------------|-----------------|
+| pause    | boolean  | NO            | false                | Pause or resume both buy and sell orders |
+| pauseBuy | boolean  | NO            | false                | Pause or resume only buy orders |
+| pauseSell| boolean  | NO            | false                | Pause or resume only sell orders |
+
+```
+POST /api/deals/{dealId}/pause
+```
 
 ### Cancel deal
 
@@ -710,6 +721,20 @@ curl -i -X POST \
 http://127.0.0.1:3000/api/deals/{dealId}/add_funds
 ```
 
+#### Pause deal
+```
+curl -i -X POST \
+-H 'Content-Type: application/json' \
+-H 'Accept: application/json' \
+-H 'api-key: {API-KEY}' \
+-d '{
+		"pause": true,
+		"pauseBuy": false,
+		"pauseSell": false
+	}' \
+http://127.0.0.1:3000/api/deals/{dealId}/pause
+```
+
 #### Cancel deal
 ```
 curl -i -X POST \
@@ -883,8 +908,8 @@ If you want to reset the SymBot database for any reason, you can do so only from
 #### Why do my orders in SymBot look different than on my exchange?
 - SymBot calculates all order steps ahead of time, considering the unique requirements and fees of different exchanges. Due to these variations, the order amounts and quantities in SymBot are essentially close estimates. The exchange fee set in the configuration also affects the process. Since exchanges often take a portion with each transaction due to rules and fees, it's rare for deals to sell the exact quantity desired. SymBot aims to sell as close to the maximum bought while still hitting the target profit percentage. If errors like insufficient funds occur, it adjusts the quantity accordingly. However, many deals will likely leave behind small amounts of crypto otherwise known as crypto "dust".
 
-#### Why did my bot get disabled?
-- A bot can be disabled several ways including manually through the web interface, programmatically using APIs or Webhooks, or even the usage of signals. SymBot also has some safety features built-in that may disable a bot automatically if an unknown error occurs as a precautionary measure to ensure there isn't something more problematic occurring. Sometimes it may just be the exchange does not allow a specific pair to be traded, so removing it from your bot is recommended. Since many errors are exchange specific, it is best to review the logs if you are unsure why your bot is disabled.
+#### Why did my bot get disabled or deal get paused?
+- A bot can be disabled or a deal can be paused several ways including manually through the web interface, programmatically using APIs or Webhooks, or even the usage of signals. SymBot also has some safety features built-in that may disable a bot or pause a deal automatically if an unknown error occurs as a precautionary measure to ensure there isn't something more problematic occurring. Sometimes it may just be the exchange does not allow a specific pair to be traded, so removing it from your bot is recommended. Since many errors are exchange specific, it is best to review the logs if you are unsure why your bot is disabled.
 
 #### Why is my system suddenly using more CPU or memory?
 - SymBot is continuously monitoring and processing data from exchanges, potential signal providers you're using such as from 3CQS, accessing the database, or performing house-keeping tasks like purging old logs. During times of increased market volatility, more data could be coming in faster and may stay in memory for longer periods of time or as necessary. It is normal to see spikes in CPU or memory usage, but if either remain excessively high for extended periods of time you may want to look into it further. Many times upgrading your CPU, increasing system memory, or upgrading hard drive capacity tend to resolve most issues and provide much better performance and an improved trading experience. See also [Advanced Setup](#advanced-setup) for additional tips.
