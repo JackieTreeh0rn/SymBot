@@ -37,10 +37,15 @@
 
 	<script>
 
+	const maxRows = 1000;
+	const offsetBottom = -225;
+
 	let dataTracker = {};
 	let modalTracker = {};
 	let pairBTC = 'BTC/USD';
 	let exchangeBTC = 'bitstamp';
+	let buffer = []; // buffer - incoming log
+	let countdownTimer;
 
 	$(document).ready(function() {
 
@@ -666,6 +671,79 @@
 
 		$('#' + divId).load(url);
 	}
+
+
+	function startCountdown(duration) {
+
+		let remaining = duration;
+
+		$('#countdown').text(`(${remaining}s)`);
+
+		countdownTimer = setInterval(() => {
+
+			remaining--;
+
+			$('#countdown').text(`(${remaining}s)`);
+
+			if (remaining <= 0) {
+
+				clearInterval(countdownTimer);
+
+				$('#countdown').text('');
+
+				setLiveState();
+			}
+		}, 1000);
+	}	
+
+
+	function stopCountdown() {
+
+    	clearInterval(countdownTimer);
+
+    	$('#countdown').text('');
+	}
+
+
+	function displayLog(data) {
+
+		let msg = '<div class="logRow">' + data + '</div>';
+
+		$('#dataBox').prepend(msg);
+
+		let currentRows = $('.logRow').length;
+
+		if (currentRows > maxRows) {
+
+			$('.logRow').slice(maxRows).remove(); // better suited for prepending
+		}
+
+		resizeBotsDeals(offsetBottom);
+	}
+
+
+	function setLiveState() {
+
+		$('#simple-switch').switchToggle(true);
+
+    	$('#dataBox').css('overflow-y', 'auto');
+
+    	$('#status-text').text('Live');
+
+    	flushBuffer();
+		
+    	stopCountdown();
+	}
+
+
+    function flushBuffer() {
+
+    	// Prepend buffered entries in order & flush
+        buffer.forEach(displayLog);
+
+        buffer = [];
+    }
+
 
 	</script>
 
