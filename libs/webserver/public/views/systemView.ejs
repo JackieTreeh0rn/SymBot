@@ -149,6 +149,7 @@ $.confirm({
 			<li>This will delete all existing data in the <%- appData.name %> database.
 			<li>All bots and functionality will resume at the same point the backup was created.
 			<li>Be aware of any assets or orders on your exchange that may have already been previously bought, sold, etc.
+			<li>If you are restoring the database to a different server or instance from where the backup was created, you may need to reset the server ID.
 			<li><%- appData.name %> will shutdown after the restore completes. You must start it manually if you do not have a process manager that does it automatically.
 		</ul>
 	
@@ -160,6 +161,8 @@ $.confirm({
 		<input class="form-field" type="password" style="width: 200px;" id="decryptPassword" name="decryptPassword" required>
 
 		<br><br>
+		<input id="resetServerId" name="resetServerId" type=checkbox class="form-field"> &nbsp; <b>Reset server ID</b>
+		<br>
 		<input id="convertData" name="convertData" type=checkbox class="form-field"> &nbsp; <b>Convert all bots and deals to sandbox mode</b>
 	</form>
 
@@ -176,6 +179,7 @@ $.confirm({
 				const inputValue = parseFloat($('#confirmNum').val());
 				const confirmBox = $('#confirmBox').prop('checked');
 				const convertData = $('#convertData').prop('checked');
+				const resetServerId = $('#resetServerId').prop('checked');
 				const password = $('#decryptPassword').val();
 
 				if (!confirmBox) {
@@ -188,7 +192,7 @@ $.confirm({
 				}
 				else {
 
-					processRestoreDb(password, convertData);
+					processRestoreDb(password, convertData, resetServerId);
 				 }
 			  },
 		  },
@@ -202,6 +206,9 @@ $.confirm({
  
  		$('#convertData').simpleSwitch();
 		$('#convertData').prop('checked', false);
+
+		$('#resetServerId').simpleSwitch();
+		$('#resetServerId').prop('checked', false);
 	},
 	onContentReady: function() {
 
@@ -304,7 +311,7 @@ function processBackupDb(password) {
 }
 
 
-function processRestoreDb(password, convertData) {
+function processRestoreDb(password, convertData, resetServerId) {
 
 	const fileInput = $('#file-input')[0]; // Assuming you have an input with id="file-input"
 	const file = fileInput.files[0];
@@ -319,6 +326,7 @@ function processRestoreDb(password, convertData) {
 
 	formData.append('backupFile', file);
 	formData.append('convertData', convertData);
+	formData.append('resetServerId', resetServerId);
 	formData.append('password', password);
 
 	$('#spinner-overlay').fadeIn(100);
