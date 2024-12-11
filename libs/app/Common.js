@@ -90,7 +90,15 @@ async function updateConfig(req, res) {
 	let signals3CQSEnabled = convertBoolean(signals3CQS, false);
 
 	let dbErr;
+	let hubInstance = false;
 	let dataMessage = 'Configuration Updated';
+
+	const instanceName = await getInstanceName();
+
+	if (instanceName && instanceName.trim() !== '') {
+
+		hubInstance = true;
+	}
 
 	const appConfigFile = shareData.appData.app_config;
 
@@ -151,6 +159,9 @@ async function updateConfig(req, res) {
 			// Set API token
 			await setToken();
 		}
+
+		const telegramEnabledOrig = shareData['appData']['telegram_enabled'];
+		const signals3CQSEnabledOrig = shareData['appData']['signals_3cqs_enabled'];
 
 		appConfig['bots']['pair_buttons'] = pairButtonsUC;
 		shareData['appData']['bots']['pair_buttons'] = pairButtonsUC;
@@ -215,10 +226,17 @@ async function updateConfig(req, res) {
 			// Restart Signals
 			startSignals();
 
-			// Restart Telegram bot
-			shareData.Telegram.stop();
-			await delay(1000);
-			shareData.Telegram.start(telegramTokenId, telegramEnabled);
+			// Restart Telegram based on if Hub in use as it may be overriding instance settings
+			if (!hubInstance || (hubInstance && telegramEnabledOrig)) {
+
+				shareData.Telegram.stop();
+
+				if (telegramEnabled) {
+
+					await delay(1000);
+					shareData.Telegram.start(telegramTokenId, telegramEnabled);
+				}
+			}
 		}
 
 		let obj = { 'success': success, 'data': dataMessage };
@@ -680,6 +698,7 @@ function logMonitor() {
 		delFiles(pathRoot + '/logs', maxDays);
 		delFiles(pathRoot + '/backups', 1, true);
 		delFiles(pathRoot + '/uploads', 1, true);
+		delFiles(pathRoot + '/downloads', 1, true);
 
 	}, (hoursInterval * (60 * 60 * 1000)));
 }
@@ -1135,6 +1154,32 @@ function roundAmount(amount) {
 }
 
 
+function adjustDecimals(value, ...arr) {
+
+	const numValue = Number(value);
+
+	if (isNaN(numValue)) {
+		return 0;
+	}
+
+	const flattenedArr = arr.flat();
+
+	const decimalPlaces = flattenedArr
+		.map(v => (isNaN(Number(v)) ? 0 : (String(v).split('.').length > 1 ? String(v).split('.')[1].length : 0)))
+		.filter(v => v > 0);
+
+	const maxDecimals = decimalPlaces.length > 0 ? Math.max(...decimalPlaces) : 0;
+
+	return numValue.toFixed(maxDecimals);
+}
+
+
+function getPrecision(arr) {
+
+	return 10 ** -Math.max(...arr.map(n => (n.toString().split('.')[1] || '').length));
+}
+
+
 function numFormatter(num) {
 
 	num = Number(num);
@@ -1178,6 +1223,32 @@ function mergeObjects(origObj, newObj) {
 	let mergeObj = { ...newObj, ...origObj };
 
 	return mergeObj;
+}
+
+
+function deepCopy(obj, seen = new WeakMap()) {
+
+	if (obj === null || typeof obj !== 'object') return obj;
+	if (seen.has(obj)) return seen.get(obj);
+
+	if (obj instanceof Date) return new Date(obj);
+	if (obj instanceof RegExp) return new RegExp(obj);
+	if (obj instanceof Map) return new Map([...obj].map(([k, v]) => [deepCopy(k, seen), deepCopy(v, seen)]));
+	if (obj instanceof Set) return new Set([...obj].map(v => deepCopy(v, seen)));
+
+	const copy = Array.isArray(obj) ? [] : {};
+
+	seen.set(obj, copy);
+
+	for (const key in obj) {
+
+		if (obj.hasOwnProperty(key)) {
+
+			copy[key] = deepCopy(obj[key], seen);
+		}
+	}
+
+	return copy;
 }
 
 
@@ -1372,6 +1443,30 @@ async function sendSocketMsg(data) {
 }
 
 
+async function sendParentMsg(data) {
+
+	const parentPort = shareData.appData.parent_port;
+
+	let msg = data['data'];
+	let msgType = data['type'];
+
+	let success = false;
+
+	if (parentPort) {
+
+		success = true;
+
+		parentPort.postMessage({
+
+			'type': msgType,
+			'data': msg
+		});
+	}
+
+	return { 'success': success };
+}
+
+
 async function renderView(view, req, res, isHub) {
 
 	res.render( view, { 'isHub': isHub, 'appData': shareData.appData } );
@@ -1381,67 +1476,106 @@ async function renderView(view, req, res, isHub) {
 const stripNonNumeric = (inputString) => inputString.replace(/[^0-9.]/g, '');
 
 
-async function getAppVersions() {
-
-    try {
-        let req = await fetch('https://raw.githubusercontent.com/3cqs-coder/SymBot/main/package.json');
-        let { version } = await req.json();
-        return { remote: stripNonNumeric(version), local: stripNonNumeric(packageJson.version) };
-    } catch (err) {
-        logger('Failed to retrieve remote application version', true);
-        return { remote: '0.0.0', local: '0.0.0' };
-    }
-}
-
-
 async function validateAppVersion() {
 
-    const { local, remote } = await getAppVersions();
-    const parseVersion = (version) => { return version.split(/[\.-]/); };
+	const owner = '3cqs-coder';
+	const repo = 'SymBot';
+	const url = `https://api.github.com/repos/${owner}/${repo}/tags`;
 
-    const localParts = parseVersion(local);
-    const remoteParts = parseVersion(remote);
+	let remoteVersion = '0.0.0';
+	let localVersion = '0.0.0';
+	let success = true;
+	let error = null;
+	let update_available = false;
 
-    let update_available = false;
+	try {
 
-    for (let i = 0; i < Math.max(localParts.length, remoteParts.length); i++) {
+		const response = await fetch(url);
 
-        const local_segment = i < localParts.length ? localParts[i] : '';
-        const remote_segment = i < remoteParts.length ? remoteParts[i] : '';
+		if (!response.ok) {
 
-        if (local_segment === '' && remote_segment !== '') {
-            // Local version has fewer segments than remote
-            update_available = true;
-            break;
-        }
+			success = false;
+			error = `Failed to fetch tags: ${response.statusText}`;
+		}
+		else {
 
-        if (local_segment < remote_segment) {
-            update_available = true;
-            break;
-        }
+			const tags = await response.json();
 
-        if (local_segment > remote_segment) {
-            // Current version is newer than remote
-            update_available = false;
-            break;
-        }
-    }
+			if (tags.length === 0) {
 
-    if (update_available) {
+				success = false;
+				error = 'No tags found for this repository.';
+			}
+			else {
 
-        logger('WARNING: Your app version is outdated. Please update to the latest version.', true);
-        logger('Current version: ' + local + ' Latest version: ' + remote, true);
+				const latestTag = tags[0].name;
 
-	} else {
+				localVersion = stripNonNumeric(packageJson.version);
+				remoteVersion = stripNonNumeric(latestTag);
 
-		if (local !== remote) {
+				const parseVersion = (version) => version.split(/[\.-]/);
 
-			logger('WARNING: Your app version is newer than the remote version. This should not happen.', true);
-            logger('Current version: ' + local + ' Latest version: ' + remote, true);
-        }
-    }
+				const localParts = parseVersion(localVersion);
+				const remoteParts = parseVersion(remoteVersion);
 
-    return { 'update_available': update_available };
+				for (let i = 0; i < Math.max(localParts.length, remoteParts.length); i++) {
+
+					const localSegment = i < localParts.length ? localParts[i] : '';
+					const remoteSegment = i < remoteParts.length ? remoteParts[i] : '';
+
+					if (localSegment === '' && remoteSegment !== '') {
+
+						update_available = true;
+						break;
+					}
+
+					if (localSegment < remoteSegment) {
+
+						update_available = true;
+						break;
+					}
+
+					if (localSegment > remoteSegment) {
+
+						update_available = false;
+						break;
+					}
+				}
+
+				if (!update_available && remoteVersion <= localVersion) {
+
+					success = false;
+					error = 'You already have the latest version';
+				}
+			}
+		}
+	}
+	catch (err) {
+
+		success = false;
+		error = 'Failed to retrieve remote application version';
+	}
+
+	if (update_available) {
+
+		logger('WARNING: Your app version is outdated. Please update to the latest version.', true);
+		logger(`Current version: ${localVersion} Latest version: ${remoteVersion}`, true);
+	}
+	else if (localVersion !== remoteVersion) {
+
+		logger('WARNING: Your app version is newer than the remote version. This should not happen.', true);
+		logger(`Current version: ${localVersion} Latest version: ${remoteVersion}`, true);
+	}
+
+	return {
+		owner,
+		repo,
+		remote: remoteVersion,
+		local: localVersion,
+		success,
+		error,
+		update_available
+	};
 }
 
 
@@ -1466,7 +1600,10 @@ module.exports = {
 	getDateParts,
 	getTimeZone,
 	roundAmount,
+	adjustDecimals,
+	getPrecision,
 	mergeObjects,
+	deepCopy,
 	numToBase26,
 	numFormatter,
 	hashCode,
@@ -1488,11 +1625,11 @@ module.exports = {
 	showTradingView,
 	fetchURL,
 	getProcessInfo,
-	getAppVersions,
 	validateAppVersion,
 	dealDurationMinutes,
 	startSignals,
 	sendSocketMsg,
+	sendParentMsg,
 
 	init: function(obj) {
 
